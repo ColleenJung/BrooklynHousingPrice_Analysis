@@ -1,0 +1,401 @@
+---
+title: "statfinalpart_1"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+Final regression model: 
+Int3 <- lm(price ~ landsqft + grosssqft + yrbuilt_bucket + bldclasssale*factor(neigh_cluster) + year+ quarter,data = data)
+
+- Data coverage : 14048 observations used for regression
+- Explanatory power : adjusted R^2 = 0.8774 
+- Predictive power : RMSE = 253174.1
+- Model parsimony : 36 model df
+
+
+#1.1 Bring the data into R 
+```{r}
+# Load necessary library
+library(tidyr)
+
+# Set the working directory (modify this path according to your file locations)
+setwd("/Users/colleenjung/Desktop/UChicago/Fall ADSP 31007 Stat Analysis")
+
+# Load the data and assign standardized column names
+B16 <- read.csv("2016_brooklyn.csv", skip=4) # Adjust this if the header row is not the first 
+B17 <- read.csv("2017_brooklyn.csv", skip=4)
+B18 <- read.csv("2018_brooklyn.csv", skip=4)
+B19 <- read.csv("2019_brooklyn.csv", skip=4)
+B20 <- read.csv("2020_brooklyn.csv", skip=6)
+B20 = B20[-1,]
+#View(B2020)
+```
+
+
+#1.2 Join the data and make it usable for analysis 
+```{r}
+# Define the new column names
+column_names <- c('borough', 'neighborhood', 'bldclasscat', 'taxclasscurr', 'block', 'lot', 'easement',
+                  'bldclasscurr', 'address', 'aptnum', 'zip', 'resunits', 'comunits', 'totunits', 
+                  'landsqft', 'grosssqft', 'yrbuilt', 'taxclasssale', 'bldclasssale', 'price', 'date')
+
+# List of dataframes
+datasets <- list(B16, B17, B18, B19, B20)
+
+# Loop through the list and change column names
+for (i in seq_along(datasets)) {
+  colnames(datasets[[i]]) <- column_names
+}
+
+# If the datasets are not in a list and you want to assign the names directly:
+colnames(B16) <- column_names
+colnames(B17) <- column_names
+colnames(B18) <- column_names
+colnames(B19) <- column_names
+colnames(B20) <- column_names
+#View(datasets)
+```
+```{r}
+df <- rbind(B16, B17, B18, B19, B20)
+
+# Filter the data
+filtered_df <- df %>%
+  filter(grepl("^A|^R", bldclasscurr),  # Starts with 'A' or 'R'
+         totunits == 1,                  # 'totunits' equals 1
+         resunits == 1,                     # 'units' equals 1
+         grosssqft > 0,                       # Gross square footage > 0
+         !is.na(price),
+         price != "-")
+
+# Print the number of rows in the filtered data
+nrow(df)
+nrow(filtered_df)
+
+#filtered_df <- subset(filtered_df, price != 0)
+```
+
+
+#1.3 Filter the data and make transformations specific to this analysis 
+```{r}
+data=filtered_df
+# Assuming 'price' might have non-numeric characters like '$' or ','
+data$price <- gsub("\\$", "", data$price) # Remove dollar signs
+data$price <- gsub(",", "", data$price)  # Remove commas
+data$price <- trimws(data$price)  # Remove spaces
+data$bldclasssale <- trimws(data$bldclasssale)  # Remove spaces
+```
+```{r}
+#change to numeric data
+data$totunits = as.numeric(data$totunits)
+data$resunits = as.numeric(data$resunits)
+data$grosssqft = as.numeric(data$grosssqft)
+data$price = as.numeric(data$price)
+data$borough = as.numeric(data$borough)
+data$zip = as.numeric(data$zip)
+#data$taxclasssale = as.numeric(data$taxclasssale)
+#data$lot = as.numeric(data$lot)  # this is tax lot
+data$landsqft = as.numeric(data$landsqft)
+#data$date <- as.Date(data$date, format="%Y-%m-%d")
+
+
+# Ensure yrbuilt is numeric
+data$yrbuilt <- as.numeric(data$yrbuilt)
+
+# Define the breaks for the year intervals
+breaks <- c(1850, 1900, 1950, 1980, 2000, 2020)
+
+# Create a new factor variable with the defined intervals
+data$yrbuilt_bucket <- cut(data$yrbuilt, breaks, 
+                        labels = c("1850-1900", "1901-1950", "1951-1980","1981-2000", "2001-2020"),
+                        include.lowest = TRUE)
+```
+```{r}
+#make 'year','month','quarter' columns
+data$date <- as.Date(data$date, format="%m/%d/%y")
+# Extract year from 'date'
+data$year <- as.numeric(format(data$date, "%y"))
+
+# Extract month from 'date'
+data$month <- as.numeric(format(data$date, "%m"))
+
+# Define the breaks for the quarters
+month_breaks <- c(1, 4, 7, 10, 13)  # The 13 is to include December in Q4
+
+# Create a new factor variable with the defined intervals for quarters
+data$quarter <- cut(data$month, 
+                    breaks = month_breaks, 
+                    labels = c("Q1", "Q2", "Q3", "Q4"),
+                    right = FALSE,  # This ensures the intervals are [), which is what you want for months
+                    include.lowest = TRUE)
+
+# Now combine with the year to create a 'Year-Q#' format
+data$quarter <- quarters(data$date)
+
+
+
+
+# Check the first few entries of the new variable
+#head(data$year_bucket)
+
+#View(data)
+```
+
+
+##Step 2: EDA and feature engineering 
+#2.1 Exploratory data analysis 
+```{r}
+library(lattice)
+#install.packages("reshape2")
+library(reshape2)
+```
+```{r}
+options(scipen = 100)
+# Assuming 'filtered_dataset' is your cleaned and filtered dataset
+
+# Histogram of Price
+hist(data$price, main = "Distribution of Housing Prices", xlab = "price")
+
+# Boxplot for Price by Neighborhood
+boxplot(price ~ neighborhood, data = data, main = "Housing Prices by Neighborhood", xlab = "neighborhood", ylab = "price")
+
+# Scatter Plot for Price vs. Gross Square Footage
+plot(data$grosssqft, data$price, main = "Price vs. Gross Square Footage", xlab = "grosssqft", ylab = "price")
+
+
+```
+#2.2 Pre-modeling and feature engineering 
+```{r}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(car) # for diagnostic plots
+library(Metrics) # for RMSE calculation
+```
+
+# Perform hierarchical clustering on the price vs neighborhood
+```{r}
+# Load necessary libraries
+library(dplyr)
+
+# Assuming your data is in a dataframe called data
+# and has columns data$neighborhood and data$price
+
+# Perform hierarchical clustering on the price column
+# First, we create a matrix of the price data
+prices <- matrix(data$price, ncol=1)
+
+# Standardizing the prices (optional, but can be beneficial)
+prices_standardized <- scale(prices)
+
+# Calculating the distance matrix
+distance <- dist(prices_standardized)
+
+# Performing hierarchical clustering using complete linkage
+hc <- hclust(distance, method = "complete")
+
+# Plotting the dendrogram
+plot(hc, hang = -1)
+
+# If you decide to cut the dendrogram into clusters:
+# cut the dendrogram at a height that results in the desired number of clusters
+clusters <- cutree(hc, h=4) # for example, cut at height 5
+
+# Add cluster assignments back to the original dataframe
+data$neigh_cluster <- clusters
+
+# Now you can examine the clusters
+for(i in unique(data$cluster)){
+  cat("Cluster", i, ":\n")
+  print(table(data$neighborhood[data$cluster == i]))
+  cat("\n")
+}
+
+table(data$neigh_cluster)
+
+```
+```{r}
+# Assuming your data is already including the neigh_cluster assignment
+profile <- data %>%
+  group_by(neigh_cluster) %>%
+  summarise(neighborhoods = toString(unique(neighborhood)))%>%
+  filter(neigh_cluster==2)
+
+# View the profile data frame to see the neighborhoods in each cluster
+profile
+#View(profile)
+```
+
+#bldclasssale: describe a property’s constructive use.
+#fit; price ~ landsqft+grosssqft + yrbuilt_bucket + bldclasssale  + factor(neigh_cluster)+ year + quarter, data = data
+```{r}
+# Fit the linear model with the new 'quarter' variable and log-transformed 'price'
+lm_model_quater <- lm(price ~grosssqft + yrbuilt_bucket + bldclasssale* factor(neigh_cluster)+ year + quarter, data = data)
+
+# Check the summary of the model to see how well the 'quarter' variable explains variance in 'price'
+summary(lm_model_quater)
+```
+```{r}
+# Calculate RMSE
+rmse_value <- sqrt(mean(lm_model_quater$residuals^2))
+rmse_value
+```
+summary for
+lm(price ~ landsqft + grosssqft + yrbuilt_bucket  + bldclasssale + neighborhood + quarter)
+
+#Assess Model Assumptions
+```{r}
+# Residual vs Fitted values for Homoscedasticity
+# Normal Q-Q Plot for Normality of Residuals
+# Scale-Location Plot for Homoscedasticity
+# Residuals vs Leverage Plot to check for influential points
+
+#par(mfrow=c(2,2))
+plot(lm_model_quater)
+```
+
+#Feature Engineering 
+```{r}
+#Adding Interaction Terms: for example, the effect of bldclasssale might differ depending on the neigh_cluster
+
+library(dplyr)
+data <- data %>% filter(price > 0)
+
+#interaction_term <- bldclasssale * neigh_cluster
+Int3 <- lm(price ~  log(grosssqft) + yrbuilt_bucket + factor(bldclasssale)*factor(neigh_cluster) + year+ quarter,data = data)
+```
+#2.3 Reach a stopping point 
+```{r}
+# Calculate RMSE 
+rmse_Int3 <- sqrt(mean(Int3$residuals^2))
+rmse_Int3
+```
+```{r}
+summary(Int3)
+```
+
+```{r}
+plot(lm_model_quater)
+
+plot(Int3)
+```
+
+# Question:how Brooklyn home purchase prices changed between 2020,Q3 and Q4
+
+```{r}
+# Step 1: Filter out the specific levels from bldclasssale
+data_filtered <- subset(data, !bldclasssale %in% c("B2", "B3", "RR"))
+
+# Step 2: If necessary, relevel the factor (this may not be needed if step 1 removes all instances)
+data_filtered$bldclasssale <- factor(data_filtered$bldclasssale)
+
+# Fit the model again with the filtered data if necessary
+# Int3_filtered <- lm(price ~ landsqft + grosssqft + yrbuilt_bucket + bldclasssale*factor(neigh_cluster) + year + quarter, data = data_filtered)
+
+# Predict prices using the original Int3 model (assuming it was fit with all the necessary levels)
+# Filter the data to Q3 and Q4 of 2020 again
+data_Q3_Q4_2020_filtered <- subset(data_filtered, year == 20 & (quarter == "Q3" | quarter == "Q4"))
+
+# Step 3: Predict housing sale prices using the Int3 model
+data_Q3_Q4_2020_filtered$predicted_price <- predict(Int3, newdata = data_Q3_Q4_2020_filtered)
+
+# Step 4: Plot the predicted prices for Q3 and Q4
+library(ggplot2)
+
+ggplot(data_Q3_Q4_2020_filtered, aes(x = quarter, y = predicted_price)) +
+  geom_boxplot() +
+  labs(title = "Predicted Housing Sale Prices in Q3 and Q4 of 2020 (Filtered Data)",
+       x = "Quarter",
+       y = "Predicted Price") +
+  theme_minimal()+
+  scale_y_continuous(limits = c(0, 10000000))
+
+```
+#Density Plot
+```{r}
+ggplot(data_Q3_Q4_2020_filtered, aes(x = predicted_price, color = quarter)) +
+  geom_density(alpha = 0.7) +
+  labs(title = "Density of Predicted Housing Sale Prices in Q3 and Q4 of 2020",
+       x = "Predicted Price",
+       y = "Density") +
+  theme_minimal()+ 
+  scale_x_continuous(limits = c(0, 7500000))
+
+```
+#Histogram
+```{r}
+ggplot(data_Q3_Q4_2020_filtered, aes(x = predicted_price, fill = quarter)) +
+  geom_histogram(position = "dodge", bins = 30, alpha = 0.7) +
+  labs(title = "Histogram of Predicted Housing Sale Prices in Q3 and Q4 of 2020",
+       x = "Predicted Price",
+       y = "Count") +
+  theme_minimal()+
+  scale_x_continuous(limits = c(0, 7500000))
+
+```
+#Boxplot
+```{r}
+# Filter the data to include only prices within the specified range
+data_Q3_Q4_2020_filtered <- subset(data_Q3_Q4_2020_filtered, predicted_price >= 0 & predicted_price <= 10000000)
+
+# Create the box plot
+ggplot(data_Q3_Q4_2020_filtered, aes(x = quarter, y = predicted_price)) +
+  geom_boxplot() +
+  labs(title = "Box Plot of Predicted Housing Sale Prices in Q3 and Q4 of 2020",
+       x = "Quarter",
+       y = "Predicted Price") +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 10000000))
+
+```
+#Calculate Original Price Change:
+```{r}
+original_Q3_mean <- mean(subset(data_filtered, quarter == "Q3" & year == 20)$price, na.rm = TRUE)
+original_Q4_mean <- mean(subset(data_filtered, quarter == "Q4" & year == 20)$price, na.rm = TRUE)
+original_change <- (original_Q3_mean-original_Q4_mean)
+original_change
+```
+```{r}
+original_Q4_mean/original_Q3_mean
+```
+
+#Calculate Predicted Price Change
+```{r}
+predicted_Q3_mean <- mean(subset(data_Q3_Q4_2020_filtered, quarter == "Q3")$predicted_price)
+predicted_Q4_mean <- mean(subset(data_Q3_Q4_2020_filtered, quarter == "Q4")$predicted_price)
+predicted_change <- (predicted_Q3_mean-predicted_Q4_mean)
+predicted_change
+```
+```{r}
+multiplicative_change <- predicted_Q3_mean / predicted_Q4_mean
+multiplicative_change
+```
+
+```{r}
+comparison_data <- data.frame(
+  Category = c("Original", "Predicted"),
+  Q3_Mean = c(original_Q3_mean, predicted_Q3_mean),
+  Q4_Mean = c(original_Q4_mean, predicted_Q4_mean),
+  Change = c(original_change, predicted_change)
+)
+
+ggplot(comparison_data, aes(x = Category, y = Change, fill = Category)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Comparison of Original and Predicted Price Changes",
+       x = "Category",
+       y = "Percentage Change") +
+  theme_minimal()
+
+```
+```{r}
+# Create a dataframe for the original and predicted means for Q3 and Q4
+comparison_data <- data.frame(
+  Quarter = rep(c("Q3", "Q4"), 2),
+  Price_Type = c(rep("Original", 2), rep("Predicted", 2)),
+  Mean_Price = c(original_Q3_mean, original_Q4_mean, predicted_Q3_mean, predicted_Q4_mean)
+)
+
+comparison_data
+```
+
